@@ -1,14 +1,13 @@
 FROM python:3
-RUN \
-  apt-get update && \
-  apt-get install ca-certificates && \
-  apt-get clean
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 
+RUN apt-get update && apt-get install ca-certificates && apt-get clean
 
-ADD certs/*.pem /usr/local/share/ca-certificates/
+ADD certs/*.crt /usr/local/share/ca-certificates/
 RUN update-ca-certificates
 
+ADD pyproject.toml /
 ADD rose.py /
-ADD requirements.txt /
-RUN pip install -r requirements.txt
-ENTRYPOINT [ "python", "./rose.py" ]
+RUN uv sync --no-dev
+
+ENTRYPOINT [ "uv", "run", "rose.py" ]

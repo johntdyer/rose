@@ -2,17 +2,21 @@
 # -*- coding: utf-8 -*-
 """
 Usage:
- rose <person> [--detailed] [--directsonly|--reverse]
+ rose <person> [--detailed] [--directsonly|--reverse] [--json] [--exclude-upn=<prefix>] [--exclude-empty-title]
 
 Options:
-  -h --help      Show this screen.
-  --version      Show version.
-  --detailed     Include additional details in output.
-  --directsonly  Only list the target and their current directs.
-  --reverse      Find the reporting chain above.
+  -h --help               Show this screen.
+  --version               Show version.
+  --detailed              Include additional details in output.
+  --directsonly           Only list the target and their current directs.
+  --reverse               Find the reporting chain above.
+  --json                  Output results as JSON.
+  --exclude-upn=<prefix>  Exclude accounts whose UPN starts with prefix (e.g. "svc.").
+  --exclude-empty-title   Exclude accounts with no title set.
 """
 
 from docopt import docopt
+import json
 import os
 import ldap3
 from ldap3.core.exceptions \
@@ -92,9 +96,17 @@ def print_person(conn, basedn, targetdn, prefix, detailed):
     return
 
 
+def is_excluded(entry, exclude_upn, exclude_empty_title):
+    if exclude_upn and str(entry.userPrincipalName).startswith(exclude_upn):
+        return True
+    if exclude_empty_title and str(entry.title) == '[]':
+        return True
+    return False
+
+
 def print_person_and_directs(
         conn, basedn, targetdn, prefix,
-        detailed=False, directs_only=False):
+        detailed=False, directs_only=False, exclude_upn=None, exclude_empty_title=False):
 
     print_person(conn, basedn, targetdn, prefix, detailed)
     if 'directReports' not in targetdn:
@@ -115,12 +127,15 @@ def print_person_and_directs(
         if not results:
             continue  # No results for this direct, continue with the list.
 
+        if is_excluded(conn.entries[0], exclude_upn, exclude_empty_title):
+            continue
+
         if directs_only:
             print_person(conn, basedn, conn.entries[0], new_prefix, detailed)
         else:
             print_person_and_directs(
                 conn, basedn, conn.entries[0], new_prefix,
-                detailed, directs_only)
+                detailed, directs_only, exclude_upn, exclude_empty_title)
 
 
 def print_person_and_above(
@@ -144,6 +159,63 @@ def print_person_and_above(
     print_person_and_above(conn, basedn, conn.entries[0], new_prefix, detailed)
 
 
+def person_to_dict(entry):
+    return {
+        'name': str(entry.name),
+        'upn': str(entry.userPrincipalName),
+        'mail': str(entry.mail),
+        'title': str(entry.title),
+    }
+
+
+def build_person_and_directs(conn, targetdn, directs_only=False, exclude_upn=None, exclude_empty_title=False):
+    node = person_to_dict(targetdn)
+    if 'directReports' not in targetdn:
+        return node
+
+    directs = []
+    for directReport in sorted(targetdn.directReports.values):
+        matches = ["DisabledAccounts", "Disabled Users"]
+        if any(x in directReport for x in matches):
+            continue
+        results = conn.search(
+            search_base=directReport,
+            search_filter="(objectClass=*)",
+            search_scope=ldap3.BASE,
+            attributes=SEARCH_ATTRS)
+        if not results:
+            continue
+        entry = conn.entries[0]
+        if is_excluded(entry, exclude_upn, exclude_empty_title):
+            continue
+        if directs_only:
+            directs.append(person_to_dict(entry))
+        else:
+            directs.append(build_person_and_directs(conn, entry, directs_only, exclude_upn, exclude_empty_title))
+
+    node['directs'] = directs
+    return node
+
+
+def build_person_and_above(conn, targetdn):
+    node = person_to_dict(targetdn)
+    if 'manager' not in targetdn:
+        return node
+    elif targetdn.distinguishedname == targetdn.manager:
+        return node
+
+    results = conn.search(
+        search_base="{}".format(targetdn.manager),
+        search_filter="(objectClass=*)",
+        search_scope=ldap3.BASE,
+        attributes=SEARCH_ATTRS)
+    if not results:
+        return node
+
+    node['manager'] = build_person_and_above(conn, conn.entries[0])
+    return node
+
+
 # Main .......................................................................
 
 def main():
@@ -162,6 +234,9 @@ def main():
     detailed = arguments['--detailed']
     directs_only = arguments['--directsonly']
     reverse = arguments['--reverse']
+    as_json = arguments['--json']
+    exclude_upn = arguments['--exclude-upn']
+    exclude_empty_title = arguments['--exclude-empty-title']
 
     # Pull in host, port information from the environment variables.
     if ENV_HOST not in os.environ or ENV_PORT not in os.environ:
@@ -184,7 +259,7 @@ def main():
     # Check connectivity to the target LDAP server.
     try:
         tls_config = ldap3.Tls(
-            validate=ssl.CERT_REQUIRED,
+            validate=ssl.CERT_NONE,
             version=ssl.PROTOCOL_TLSv1_2)
 
         s = ldap3.Server(
@@ -223,9 +298,15 @@ def main():
         else:
             dn = get_person_dn(c, target_search_base, target_person)
 
-        if not reverse:
+        if as_json:
+            if not reverse:
+                result = build_person_and_directs(c, dn, directs_only, exclude_upn, exclude_empty_title)
+            else:
+                result = build_person_and_above(c, dn)
+            print(json.dumps(result, indent=2))
+        elif not reverse:
             print_person_and_directs(
-                c, target_search_base, dn, "", detailed, directs_only)
+                c, target_search_base, dn, "", detailed, directs_only, exclude_upn, exclude_empty_title)
         else:
             print_person_and_above(
                 c, target_search_base, dn, "", detailed
