@@ -2,79 +2,166 @@
 
 ROSE stands for "Recursive organizational structure extractor" and was created as a personal project. It connects to LDAP to extract user information including manager information to construct a tree.
 
+## Environment Variables
+
+All five must be set before running:
+
+| Variable | Purpose |
+|---|---|
+| `ROSE_HOST` | LDAP server hostname |
+| `ROSE_PORT` | LDAP server port |
+| `ROSE_UNAME` | Bind username |
+| `ROSE_PWORD` | Bind password |
+| `ROSE_SEARCH_BASE` | LDAP search base DN |
+
 ## Running the CLI Application
 
-There are now two methods to invoke this application: a docker container that encapsulates the necessary prerequisites and the simple Python application using the same steps to build on your host machine.
+### Docker
 
-### Docker Container Version
+Copy any CA certificates you need into the `certs/` folder, then build:
 
-Use the following to prepare your local environment.
+```
+make
+```
 
-1. Set up these required environment variables for connectivity for LDAP search.
-    * `ROSE_HOST`
-    * `ROSE_PORT`
-    * `ROSE_UNAME`
-    * `ROSE_PWORD`
-    * `ROSE_SEARCH_BASE` 
-1. Copy any public certicates from any certifcate authority you require into the `certs/` folder.
-1. Build the local container by executing the `make` command.
+Run, passing environment variables through:
 
-Once built, run the Docker command line specifying the aforementioned necessary environment variables.
 ```
 $ docker run \
     -e ROSE_HOST -e ROSE_PORT \
     -e ROSE_UNAME -e ROSE_PWORD \
     -e ROSE_SEARCH_BASE \
-    giuseppe7/rose --directs jhancock
+    giuseppe7/rose jhancock
 
 John Hancock
     Jane Doe
     John Doe
 ```
 
+### Stand-alone Python (uv)
 
-### Stand-alone Python
-
-Use the following to prepare your local environment.
-
-1. Ensure you have the latest `pip` installed.  
-   ```
-   python3 -m pip install --upgrade pip
-   ```
-1. Install `virtualenv` to avoid installing anything globally that may disrupt your other applications.  
-   ```
-   python3 -m pip install --user virtualenv
-   python3 -m venv  ./venv 
-   source ./venv/bin/activate
-   ```
-1. Run `pip` with the requirements file to locally install necessary modules.  
-   ```
-   pip install -r requirements.txt
-   ```
-1. Set up these required environment variables for connectivity for the LDAP search.
-    * `ROSE_HOST`
-    * `ROSE_PORT`
-    * `ROSE_UNAME`
-    * `ROSE_PWORD`
-    * `ROSE_SEARCH_BASE` 
-
-To use the python script, invoke it with a sAMAccountName to perform the organization printout. Use the `--help` option for additional options. 
+Install [uv](https://docs.astral.sh/uv/getting-started/installation/), then:
 
 ```
-$ ./rose.py jhancock
+uv sync
+```
+
+Run the script:
+
+```
+$ uv run rose.py jhancock
 John Hancock
     Jane Doe
     John Doe
 ```
 
-Basic unit tests required. Currently linting is only done with `flake8`.
+Lint:
 
+```
+uv run flake8 rose.py
+```
+
+## Options
+
+The `<person>` argument accepts either a `sAMAccountName` or an email address.
+
+```
+Usage:
+ rose <person> [--detailed] [--directsonly|--reverse] [--json] [--exclude-upn=<prefix>] [--exclude-empty-title]
+```
+
+### --detailed
+
+Include UPN, email, and title in text output:
+
+```
+$ uv run rose.py jhancock --detailed
+"John Hancock", "jhancock@example.com", "jhancock@example.com", "CEO"
+    "Jane Doe", "jdoe@example.com", "jane.doe@example.com", "VP, Engineering"
+```
+
+### --directsonly
+
+Show only the target and their immediate direct reports, without recursing:
+
+```
+$ uv run rose.py jhancock --directsonly
+John Hancock
+    Jane Doe
+    John Doe
+```
+
+### --reverse
+
+Walk up the reporting chain instead of down:
+
+```
+$ uv run rose.py jhancock --reverse
+John Hancock
+    Jane Doe
+        John Smith
+```
+
+### --json
+
+Output the full tree as JSON. Always includes `name`, `upn`, `mail`, and `title`.
+Downward traversal nests a `directs` array; `--reverse` nests a `manager` object.
+
+```
+$ uv run rose.py jhancock --json
+{
+  "name": "John Hancock",
+  "upn": "jhancock@example.com",
+  "mail": "john.hancock@example.com",
+  "title": "CEO",
+  "directs": [
+    {
+      "name": "Jane Doe",
+      "upn": "jdoe@example.com",
+      "mail": "jane.doe@example.com",
+      "title": "VP, Engineering",
+      "directs": []
+    }
+  ]
+}
+```
+
+Extract all email addresses from JSON output using `jq`:
+
+```
+$ uv run rose.py jhancock --json | jq -r '[.. | objects | .mail // empty] | unique[]'
+jane.doe@example.com
+john.hancock@example.com
+```
+
+### --exclude-upn=\<prefix\>
+
+Exclude any account whose UPN starts with the given prefix. Useful for filtering out service accounts:
+
+```
+$ uv run rose.py jhancock --exclude-upn=svc.
+```
+
+### --exclude-empty-title
+
+Exclude accounts with no title set (LDAP returns `[]` for empty attributes):
+
+```
+$ uv run rose.py jhancock --exclude-empty-title
+```
+
+### Combining filters
+
+Options can be combined freely:
+
+```
+$ uv run rose.py jhancock --json --exclude-upn=svc. --exclude-empty-title | \
+    jq -r '[.. | objects | .mail // empty] | unique[]'
+```
 
 ---
 
 ## References
-
-See below for helpful sources.
 
 1. https://ldap3.readthedocs.io/en/latest/index.html
 1. https://www.viget.com/articles/two-ways-to-share-git-hooks-with-your-team/
