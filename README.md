@@ -134,6 +134,14 @@ jane.doe@example.com
 john.hancock@example.com
 ```
 
+To exclude contractors, use `select` with a case-insensitive regex to filter out any entry whose title contains "Contractor":
+
+```
+$ uv run rose.py jhancock --json | jq -r '[.. | objects | select(.title | test("Contractor"; "i") | not) | .mail // empty] | unique[]'
+jane.doe@example.com
+john.hancock@example.com
+```
+
 ### --exclude-upn=\<prefix\>
 
 Exclude any account whose UPN starts with the given prefix. Useful for filtering out service accounts:
