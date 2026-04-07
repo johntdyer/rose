@@ -2,17 +2,16 @@
 # -*- coding: utf-8 -*-
 """
 Usage:
- rose <person> [--detailed] [--directsonly|--reverse] [--json] [--exclude-upn=<prefix>] [--exclude-empty-title]
+ rose <person> [--detailed] [--directsonly|--reverse] [--json] [--exclude-empty-title]
 
 Options:
-  -h --help               Show this screen.
-  --version               Show version.
-  --detailed              Include additional details in output.
-  --directsonly           Only list the target and their current directs.
-  --reverse               Find the reporting chain above.
-  --json                  Output results as JSON.
-  --exclude-upn=<prefix>  Exclude accounts whose UPN starts with prefix (e.g. "svc.").
-  --exclude-empty-title   Exclude accounts with no title set.
+  -h --help              Show this screen.
+  --version              Show version.
+  --detailed             Include additional details in output.
+  --directsonly          Only list the target and their current directs.
+  --reverse              Find the reporting chain above.
+  --json                 Output results as JSON.
+  --exclude-empty-title  Exclude accounts with no title set.
 """
 
 from docopt import docopt
@@ -96,9 +95,7 @@ def print_person(conn, basedn, targetdn, prefix, detailed):
     return
 
 
-def is_excluded(entry, exclude_upn, exclude_empty_title):
-    if exclude_upn and str(entry.userPrincipalName).startswith(exclude_upn):
-        return True
+def is_excluded(entry, exclude_empty_title):
     if exclude_empty_title and str(entry.title) == '[]':
         return True
     return False
@@ -106,7 +103,7 @@ def is_excluded(entry, exclude_upn, exclude_empty_title):
 
 def print_person_and_directs(
         conn, basedn, targetdn, prefix,
-        detailed=False, directs_only=False, exclude_upn=None, exclude_empty_title=False):
+        detailed=False, directs_only=False, exclude_empty_title=False):
 
     print_person(conn, basedn, targetdn, prefix, detailed)
     if 'directReports' not in targetdn:
@@ -127,7 +124,7 @@ def print_person_and_directs(
         if not results:
             continue  # No results for this direct, continue with the list.
 
-        if is_excluded(conn.entries[0], exclude_upn, exclude_empty_title):
+        if is_excluded(conn.entries[0], exclude_empty_title):
             continue
 
         if directs_only:
@@ -135,7 +132,7 @@ def print_person_and_directs(
         else:
             print_person_and_directs(
                 conn, basedn, conn.entries[0], new_prefix,
-                detailed, directs_only, exclude_upn, exclude_empty_title)
+                detailed, directs_only, exclude_empty_title)
 
 
 def print_person_and_above(
@@ -168,7 +165,7 @@ def person_to_dict(entry):
     }
 
 
-def build_person_and_directs(conn, targetdn, directs_only=False, exclude_upn=None, exclude_empty_title=False):
+def build_person_and_directs(conn, targetdn, directs_only=False, exclude_empty_title=False):
     node = person_to_dict(targetdn)
     if 'directReports' not in targetdn:
         return node
@@ -186,12 +183,12 @@ def build_person_and_directs(conn, targetdn, directs_only=False, exclude_upn=Non
         if not results:
             continue
         entry = conn.entries[0]
-        if is_excluded(entry, exclude_upn, exclude_empty_title):
+        if is_excluded(entry, exclude_empty_title):
             continue
         if directs_only:
             directs.append(person_to_dict(entry))
         else:
-            directs.append(build_person_and_directs(conn, entry, directs_only, exclude_upn, exclude_empty_title))
+            directs.append(build_person_and_directs(conn, entry, directs_only, exclude_empty_title))
 
     node['directs'] = directs
     return node
@@ -235,7 +232,6 @@ def main():
     directs_only = arguments['--directsonly']
     reverse = arguments['--reverse']
     as_json = arguments['--json']
-    exclude_upn = arguments['--exclude-upn']
     exclude_empty_title = arguments['--exclude-empty-title']
 
     # Pull in host, port information from the environment variables.
@@ -300,13 +296,13 @@ def main():
 
         if as_json:
             if not reverse:
-                result = build_person_and_directs(c, dn, directs_only, exclude_upn, exclude_empty_title)
+                result = build_person_and_directs(c, dn, directs_only, exclude_empty_title)
             else:
                 result = build_person_and_above(c, dn)
             print(json.dumps(result, indent=2))
         elif not reverse:
             print_person_and_directs(
-                c, target_search_base, dn, "", detailed, directs_only, exclude_upn, exclude_empty_title)
+                c, target_search_base, dn, "", detailed, directs_only, exclude_empty_title)
         else:
             print_person_and_above(
                 c, target_search_base, dn, "", detailed

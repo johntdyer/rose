@@ -67,7 +67,7 @@ The `<person>` argument accepts either a `sAMAccountName` or an email address.
 
 ```
 Usage:
- rose <person> [--detailed] [--directsonly|--reverse] [--json] [--exclude-upn=<prefix>] [--exclude-empty-title]
+ rose <person> [--detailed] [--directsonly|--reverse] [--json] [--exclude-empty-title]
 ```
 
 ### --detailed
@@ -142,29 +142,12 @@ jane.doe@example.com
 john.hancock@example.com
 ```
 
-### --exclude-upn=\<prefix\>
-
-Exclude any account whose UPN starts with the given prefix. Useful for filtering out service accounts:
-
-```
-$ uv run rose.py jhancock --exclude-upn=svc.
-```
-
 ### --exclude-empty-title
 
-Exclude accounts with no title set (LDAP returns `[]` for empty attributes):
+Exclude accounts with no title set (LDAP returns `[]` for empty attributes). This effectively filters out service accounts and other non-person entries:
 
 ```
 $ uv run rose.py jhancock --exclude-empty-title
-```
-
-### Combining filters
-
-Options can be combined freely:
-
-```
-$ uv run rose.py jhancock --json --exclude-upn=svc. --exclude-empty-title | \
-    jq -r '[.. | objects | .mail // empty] | unique[]'
 ```
 
 ---
